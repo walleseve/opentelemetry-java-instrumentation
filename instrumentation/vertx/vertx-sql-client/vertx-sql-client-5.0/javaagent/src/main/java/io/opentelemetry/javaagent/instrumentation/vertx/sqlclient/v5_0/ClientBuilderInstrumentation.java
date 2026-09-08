@@ -5,7 +5,6 @@
 
 package io.opentelemetry.javaagent.instrumentation.vertx.sqlclient.v5_0;
 
-import static io.opentelemetry.javaagent.instrumentation.vertx.sqlclient.common.v4_0.VertxSqlClientUtil.getClientInfoProvider;
 import static io.opentelemetry.javaagent.instrumentation.vertx.sqlclient.common.v4_0.VertxSqlClientUtil.setClientInfoProvider;
 import static io.opentelemetry.javaagent.instrumentation.vertx.sqlclient.common.v4_0.VertxSqlClientUtil.setPoolClientInfoProvider;
 import static java.util.Collections.singletonList;
@@ -99,9 +98,6 @@ class ClientBuilderInstrumentation implements TypeInstrumentation {
         @Advice.FieldValue("connectHandler") @Nullable Handler<SqlConnection> connectHandler) {
       List<SqlConnectOptions> databases =
           VertxSqlClientSingletons.getBuilderDatabases(clientBuilder);
-      VertxSqlClientInfoProvider previousProvider = getClientInfoProvider();
-      VertxSqlClientSupplierInfo previousSupplier =
-          VertxSqlClientSingletons.getBuildingSupplierCapture();
       if (databases != null && !databases.isEmpty()) {
         VertxSqlClientInfo info =
             VertxSqlClientInfo.create(
@@ -112,17 +108,14 @@ class ClientBuilderInstrumentation implements TypeInstrumentation {
           info != null
               ? VertxSqlClientSingletons.wrapConnectHandler(connectHandler, info)
               : connectHandler,
-          new BuildState(info, connectHandler, previousProvider, previousSupplier)
+          new BuildState(info, connectHandler)
         };
       }
 
       VertxSqlClientSupplierInfo supplierCapture = new VertxSqlClientSupplierInfo();
       setClientInfoProvider(supplierCapture);
       VertxSqlClientSingletons.setBuildingSupplierCapture(supplierCapture);
-      return new Object[] {
-        connectHandler,
-        new BuildState(supplierCapture, connectHandler, previousProvider, previousSupplier)
-      };
+      return new Object[] {connectHandler, new BuildState(supplierCapture, connectHandler)};
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class, inline = false)
@@ -131,13 +124,13 @@ class ClientBuilderInstrumentation implements TypeInstrumentation {
         @Advice.Return @Nullable Object client,
         @Advice.FieldValue("connectHandler") @Nullable Handler<SqlConnection> connectHandler,
         @Advice.Enter @Nullable Object[] enterState) {
+      setClientInfoProvider(null);
+      VertxSqlClientSingletons.setBuildingSupplierCapture(null);
       if (enterState == null) {
         return new Object[] {connectHandler};
       }
 
       BuildState state = (BuildState) enterState[1];
-      setClientInfoProvider(state.previousProvider);
-      VertxSqlClientSingletons.setBuildingSupplierCapture(state.previousSupplier);
       if (client instanceof Pool) {
         setPoolClientInfoProvider((Pool) client, state.infoProvider);
       }
@@ -147,18 +140,12 @@ class ClientBuilderInstrumentation implements TypeInstrumentation {
     public static class BuildState {
       @Nullable public final VertxSqlClientInfoProvider infoProvider;
       @Nullable public final Handler<SqlConnection> connectHandler;
-      @Nullable public final VertxSqlClientInfoProvider previousProvider;
-      @Nullable public final VertxSqlClientSupplierInfo previousSupplier;
 
       public BuildState(
           @Nullable VertxSqlClientInfoProvider infoProvider,
-          @Nullable Handler<SqlConnection> connectHandler,
-          @Nullable VertxSqlClientInfoProvider previousProvider,
-          @Nullable VertxSqlClientSupplierInfo previousSupplier) {
+          @Nullable Handler<SqlConnection> connectHandler) {
         this.infoProvider = infoProvider;
         this.connectHandler = connectHandler;
-        this.previousProvider = previousProvider;
-        this.previousSupplier = previousSupplier;
       }
     }
   }

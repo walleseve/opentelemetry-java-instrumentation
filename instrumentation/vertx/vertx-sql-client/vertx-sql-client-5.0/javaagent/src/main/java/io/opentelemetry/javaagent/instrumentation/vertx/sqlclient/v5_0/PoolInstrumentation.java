@@ -69,15 +69,10 @@ class PoolInstrumentation implements TypeInstrumentation {
   public static class PoolAdvice {
 
     @Advice.OnMethodEnter(suppress = Throwable.class, inline = false)
-    public static PoolState onEnter(
+    public static CallDepth onEnter(
         @Advice.Argument(1) SqlConnectOptions sqlConnectOptions,
         @Advice.Origin("#t") String declaringTypeName) {
       CallDepth callDepth = CallDepth.forClass(Pool.class);
-      PoolState state =
-          new PoolState(
-              callDepth,
-              getClientInfoProvider(),
-              VertxSqlClientSingletons.getBuildingSupplierCapture());
       if (callDepth.getAndIncrement() == 0) {
         String dbSystemName = resolveDbSystemName(sqlConnectOptions, declaringTypeName);
         VertxSqlClientInfoCapture infoCapture =
@@ -86,15 +81,15 @@ class PoolInstrumentation implements TypeInstrumentation {
         setClientInfoProvider(infoCapture);
         VertxSqlClientSingletons.setBuildingSupplierCapture(null);
       }
-      return state;
+      return callDepth;
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class, inline = false)
     public static void onExit(
         @Advice.Return @Nullable Pool pool,
         @Advice.Argument(1) SqlConnectOptions sqlConnectOptions,
-        @Advice.Enter PoolState state) {
-      if (state.callDepth.decrementAndGet() > 0) {
+        @Advice.Enter CallDepth callDepth) {
+      if (callDepth.decrementAndGet() > 0) {
         return;
       }
 
@@ -111,23 +106,8 @@ class PoolInstrumentation implements TypeInstrumentation {
       if (pool != null) {
         setPoolClientInfoProvider(pool, infoProvider);
       }
-      setClientInfoProvider(state.previousProvider);
-      VertxSqlClientSingletons.setBuildingSupplierCapture(state.previousSupplier);
-    }
-
-    public static final class PoolState {
-      public final CallDepth callDepth;
-      @Nullable public final VertxSqlClientInfoProvider previousProvider;
-      @Nullable public final VertxSqlClientSupplierInfo previousSupplier;
-
-      public PoolState(
-          CallDepth callDepth,
-          @Nullable VertxSqlClientInfoProvider previousProvider,
-          @Nullable VertxSqlClientSupplierInfo previousSupplier) {
-        this.callDepth = callDepth;
-        this.previousProvider = previousProvider;
-        this.previousSupplier = previousSupplier;
-      }
+      setClientInfoProvider(null);
+      VertxSqlClientSingletons.setBuildingSupplierCapture(null);
     }
   }
 
